@@ -17,9 +17,14 @@ Edit `.env` with your credentials:
 
 ```env
 POSTGRES_PASSWORD=replace-with-a-long-random-password
-ANTHROPIC_API_KEY=your-anthropic-api-key
-TWITTER_AUTH_TOKEN=your_twitter_auth_token
+# Optional; leave blank unless you enable social feeds or entity extraction.
+REDDIT_RSS_USER=
+REDDIT_RSS_FEED=
+TWITTER_AUTH_TOKEN=
+ANTHROPIC_API_KEY=
 ```
+
+Keep `.env` private. It contains database and potentially social-account credentials; never commit it or copy it to the public showcase environment.
 
 ## Starting
 
@@ -27,12 +32,12 @@ TWITTER_AUTH_TOKEN=your_twitter_auth_token
 docker compose up --build -d
 ```
 
-This starts all 8 services: db, redis, backend, worker, beat, frontend, rsshub, nginx.
+This starts the database, Redis, API, feed and control workers, scheduler, frontend, RSSHub and nginx. The full installation includes management features; it is not a public read-only site and has no built-in user login. Keep it on a trusted network or add authentication before exposing it.
 
 ## Updating
 
 ```bash
-cd /tmp/feedwire
+# Run from your FeedWire checkout.
 git pull
 docker compose up --build -d
 ```
@@ -68,7 +73,7 @@ curl http://localhost:8088/api/health
 
 ## Cloudflare Tunnel
 
-For a private installation, put an authentication layer such as Cloudflare Access in front of the public hostname. For a public showcase, use the separate Compose project in [showcase-deployment.md](showcase-deployment.md) and route a dedicated hostname to its nginx port.
+For the intended public read-only site, use the separate Compose project in [showcase-deployment.md](showcase-deployment.md) and route a dedicated hostname to its nginx port. Do not expose this full installation directly. If you need remote access to the full installation, put an authentication layer such as Cloudflare Access in front of it.
 
 ## Database
 
@@ -84,14 +89,40 @@ To restore:
 docker compose exec -T db psql -U feedwire feedwire < backup.sql
 ```
 
-## Twitter/X Feed Setup
+## Optional social feeds
 
-1. Log into Twitter/X in a browser
-2. Open DevTools > Application > Cookies > `https://x.com`
-3. Copy the `auth_token` cookie value
-4. Add to `.env`: `TWITTER_AUTH_TOKEN=your_token_here`
-5. Restart RSSHub: `docker compose restart rsshub`
-6. Add feeds as: `http://rsshub:1200/twitter/user/USERNAME`
+Social integrations are optional and apply only to the full/private Compose project. The public showcase has no social credentials and the seed script excludes Reddit/X/RSSHub feeds. If a social feed URL contains account tokens or other private query parameters, do not publish it.
+
+### Reddit RSS
+
+Basic public subreddit feeds do not require a cookie. For example:
+
+```text
+https://www.reddit.com/r/selfhosted/.rss
+```
+
+If you want to try Reddit's optional authenticated RSS parameters, set `REDDIT_RSS_USER` and `REDDIT_RSS_FEED` in your private `.env`, using the values from your Reddit RSS feed settings at `https://www.reddit.com/prefs/feeds/`. FeedWire adds these as `user` and `feed` query parameters to Reddit feed requests. These are sensitive account tokens, not cookies. Reddit's RSS behavior and throttling change over time; this is optional and may not prevent rate limits. Restart the API and feed workers after changing the values:
+
+```bash
+docker compose up -d --no-deps backend worker control-worker
+```
+
+### X via RSSHub
+
+RSSHub's X/Twitter routes may require the `auth_token` cookie from a browser logged into X:
+
+1. Log in to X in your browser.
+2. In the browser's cookie/storage settings for `https://x.com`, locate the `auth_token` cookie.
+3. Put only its value in `TWITTER_AUTH_TOKEN` in the private `.env`. Treat it like a password: it can grant access to your logged-in session. Never paste it into a feed URL, issue, screenshot or public file.
+4. Recreate RSSHub so it receives the new environment value:
+
+   ```bash
+   docker compose up -d --no-deps rsshub
+   ```
+
+5. Add a route such as `http://rsshub:1200/twitter/user/USERNAME` in the full installation.
+
+Cookies expire and RSSHub/X may change or block routes. If a route stops working, remove the cookie from `.env` and rotate/revoke the session through X if you believe it was exposed. Never configure this cookie in `.env.showcase`.
 
 ## Ports
 
@@ -101,15 +132,13 @@ docker compose exec -T db psql -U feedwire feedwire < backup.sql
 | backend | 8000 | — | API, internal to the Compose network |
 | db | 5432 | — | PostgreSQL, internal to the Compose network |
 | redis | 6379 | — | Task queue, internal to the Compose network |
-| frontend | 3000 | — | Internal only (Gitea uses 3000) |
+| frontend | 3000 | — | Internal to the Compose network |
 | rsshub | 1200 | — | Internal only, proxied via /rsshub/ |
 
 ## Troubleshooting
 
-**Frontend won't start**: Check if port 3000 is in use (Gitea). Frontend should be `expose` only, not `ports`.
+**Frontend won't start**: Check the frontend logs. It is internal to the Compose network (`expose` only), not published on a host port.
 
 **Worker/beat crashing**: Check logs with `docker compose logs worker`. Common cause: database schema changes need a backend restart to run migrations.
 
-**Twitter feeds returning 503**: The auth token has expired. Get a fresh one from your browser cookies.
-
-**AI summarization fails**: Check Settings page — API key must be saved there, or set as environment variable.
+**X/Twitter feeds fail**: RSSHub routes are third-party integrations and can break when X changes. Check the RSSHub logs, and refresh/revoke the cookie if needed.

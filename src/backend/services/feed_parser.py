@@ -10,9 +10,8 @@ import hashlib
 
 
 def _apply_reddit_auth(url: str) -> str:
-    # Reddit started rejecting anonymous RSS in mid-2026. Authenticated feeds
-    # work if you tack on the user= and feed= params from prefs/feeds. Same
-    # token pair works for every Reddit URL, including /search/.rss.
+    # Optional RSS query credentials. Reddit RSS access and throttling vary;
+    # these parameters may help some installations but are not required.
     try:
         parsed = urlparse(url)
     except Exception:

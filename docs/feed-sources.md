@@ -35,13 +35,15 @@ FeedWire also auto-discovers feeds — just paste a page URL when adding a feed 
 
 ## Reddit
 
-Add `.rss` to any subreddit URL:
+Add `.rss` to a subreddit URL. These feeds are optional and go in the full/private installation; the public showcase deliberately excludes them.
 
 ```
 https://www.reddit.com/r/selfhosted/.rss
 https://www.reddit.com/r/homelab/.rss
 https://www.reddit.com/r/programming/.rss
 ```
+
+No cookie is normally needed for a public subreddit feed. If you want to try Reddit's optional `user`/`feed` RSS parameters, configure `REDDIT_RSS_USER` and `REDDIT_RSS_FEED` in the private `.env` as described in the [deployment guide](deployment.md#reddit-rss). They are sensitive query credentials, not cookies; do not publish them or put them in a showcase feed URL. Reddit can change RSS access and throttling at any time, and these parameters may not avoid rate limits.
 
 ## GitHub
 
@@ -53,9 +55,9 @@ https://github.com/anthropics/claude-code/releases.atom
 https://github.com/your-org/your-repo/commits/main.atom
 ```
 
-## Twitter/X (via RSSHub)
+## X / Twitter (via RSSHub)
 
-Requires the bundled RSSHub with a valid Twitter `auth_token` cookie (set in `.env`).
+Optional. Requires the bundled RSSHub and may require a valid X `auth_token` cookie in the full installation's private `.env`. Cookie-based access is sensitive and may stop working when X or RSSHub changes. Follow the [deployment guide](deployment.md#x-via-rsshub) to configure it. The public showcase never includes this cookie or RSSHub routes.
 
 ```
 http://rsshub:1200/twitter/user/USERNAME

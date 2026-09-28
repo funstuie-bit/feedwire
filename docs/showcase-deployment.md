@@ -1,33 +1,54 @@
-# Public FeedWire showcase
+# Public read-only showcase
 
-The showcase is a second FeedWire instance. It has its own PostgreSQL volume and Redis queue; the private instance keeps running independently.
+The showcase is a separate FeedWire deployment intended to be visible to anyone. The live example is [live-feedwire.bomohome.work](https://live-feedwire.bomohome.work). Its UI and layout match FeedWire, but it has no feed-management or account controls and rejects writes on the server.
 
-## What is copied
+## Isolation and copied data
 
-Run `bash scripts/seed-showcase.sh` on a host where the normal private FeedWire Compose stack is running and `.env.showcase` has been configured. The script copies category names and feed definitions only. It excludes private feeds, Reddit/X/RSSHub social feeds, feed URLs with embedded credentials, and URLs with credential-like query parameters. New subscriptions are stamped with the current time so the public worker begins fetching fresh stories immediately.
+The showcase has its own PostgreSQL volume, Redis queue and Compose project. It does not share a database, Docker network or credentials with the full/private installation. It never starts RSSHub and its Reddit/X/API-key environment variables are explicitly blank.
 
-It does not copy stories, settings, provider keys, cookies, notes, saved/read state, rules, tags or scores. It never starts RSSHub. The public app exposes only read requests needed for the story library; writes and management pages return 404. Its article reader uses feed-provided content and does not fetch arbitrary URLs on a visitor's behalf.
+The seed script copies only category labels and eligible feed definitions from the normal FeedWire database. It excludes private feeds, Reddit/X/RSSHub routes, URLs with embedded credentials, and URLs containing credential-like query parameters. The showcase starts each copied subscription from the current local day and fetches a fresh story history. It does **not** copy existing stories, settings, provider keys, cookies, notes, saved/read state, rules, tags or scores. It refuses to seed a non-empty showcase database.
 
-## Start
+The public reader serves feed-provided article content; it does not fetch arbitrary links on a visitor's behalf. The backend allows only the read APIs needed by the UI. Management pages redirect home, mutation APIs return 404, and `/rsshub` is blocked.
 
-1. Create `.env.showcase` from `.env.showcase.example`. Replace the database password with a new random value (for example, `openssl rand -hex 32`). Keep this file private; it is ignored by Git.
-2. Start the isolated services and seed the safe feeds:
+## Setup
+
+1. Start the regular/private Compose project and add the feed sources you want the showcase to display. You can add them through the UI or import an OPML file. Keep that instance on a trusted network or behind authentication. Do not commit your `.env` or OPML files.
+2. In the same checkout, create a separate showcase environment file and set a new, strong database password. Set the origin to the public HTTPS URL you plan to use:
+
+   ```bash
+   cp .env.showcase.example .env.showcase
+   # Edit .env.showcase; for example:
+   # SHOWCASE_DB_PASSWORD=<a-long-random-value>
+   # SHOWCASE_ORIGIN=https://live-feedwire.bomohome.work
+   ```
+
+3. Start the isolated showcase and copy the safe categories/feed definitions:
 
    ```bash
    docker compose -p feedwire-showcase --env-file .env.showcase -f docker-compose.showcase.yml up --build -d
    bash scripts/seed-showcase.sh
    ```
 
-3. Wait for the worker to fetch the first batch. The default local port is `8089`; `SHOWCASE_HTTP_PORT` can change it.
-4. Route a dedicated public hostname through your HTTPS reverse proxy or tunnel to this port. Do not reuse the private hostname's Access policy: the showcase is intentionally public. The private site and its credentials are not connected to this Compose project.
+4. The public worker fetches a fresh batch. The default local HTTP port is `8089`; change it with `SHOWCASE_HTTP_PORT` if needed.
 
-The `PUBLIC_READ_ONLY` backend flag is a server-side API allowlist. The browser hiding admin buttons is only a convenience. Keep the database and Redis ports unpublished, and do not attach this project to the private app's Docker network.
+`.env.showcase` is ignored by Git and must remain private. Do not add Reddit/X cookies or tokens to it. The seed operation is one-way and copies feed definitions only; later changes to the private feed list are not automatically mirrored. The script deliberately refuses to merge or overwrite a non-empty catalogue. For a clean re-seed, use a fresh showcase database/volume and rerun the setup; be aware that removing a database volume deletes its contents.
 
-## Verify / maintain
+## Publish behind Cloudflare Tunnel
+
+Add a **Published application** route to a Cloudflare Tunnel:
+
+- Hostname: your public subdomain (for example, `live-feedwire.bomohome.work`)
+- Service: `http://<host-running-compose>:8089`
+- Access: leave this hostname public if the showcase is meant for anyone
+
+Cloudflare creates the hostname's DNS record when the route is added. If the tunnel runs on the same host, `http://localhost:8089` may be used instead. Do not point the public hostname at the full/private app's port. Keep any Access login policy on the full/private hostname; do not remove its protection to publish the showcase.
+
+## Verify and maintain
 
 ```bash
 docker compose -p feedwire-showcase --env-file .env.showcase -f docker-compose.showcase.yml ps
 curl -fsS http://localhost:8089/api/health
+curl -fsS http://localhost:8089/api/feeds
 ```
 
-The showcase starts with empty reading state and populates articles from feed publication after deployment. The ordinary feed polling schedule continues in its own worker. Its own database means a cleanup or outage here cannot delete data from the private instance.
+The showcase's own feed polling continues independently. Its database means that cleanup or an outage there cannot delete data from the full/private instance.

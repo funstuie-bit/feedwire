@@ -1,178 +1,87 @@
 # FeedWire
 
-Self-hosted RSS/Atom reader with a compact inbox, article reader, grouped coverage, search and source management. The public showcase deployment starts with fresh, unauthenticated feeds and has a separate database.
+FeedWire is a self-hosted RSS/Atom reader with a compact inbox, article reader, grouped coverage, search and feed management.
 
-Seven compact navigation sections, a full-width inbox, centred reader and focus mode. Neutral dark and light themes share a matching sidebar and readable accents. “Open original” and alternative-coverage links use actual article URLs.
+**Live public showcase:** [live-feedwire.bomohome.work](https://live-feedwire.bomohome.work) — a read-only instance that starts with fresh, unauthenticated feeds. It has a separate database and does not contain the private installation's reading history, settings or social-media credentials.
 
-## Features
+This repository documents both that isolated public-showcase setup and the optional full/private installation. Reddit and X integrations are opt-in for the full installation; they are deliberately absent from the public showcase.
 
-- **Feed management** — subscribe to RSS/Atom feeds, auto-discover feeds from page URLs, OPML import/export
-- **Synthetic feeds** — create RSS feeds from any webpage that doesn't have one
-- **Twitter/X feeds** — via bundled RSSHub with cookie-based auth
-- **AI summarisation off** — no summary controls or summary generation, including existing rules and scheduled/manual digests; old stored summaries remain in the database
-- **Entity extraction** — pull out people, orgs, technologies, locations from articles
-- **Article grouping** — matches canonical article URLs and similar headlines, with links to alternative coverage (no model calls)
-- **Relevance scoring** — learns from your reading behavior, surfaces interesting items
-- **Rules engine** — match items by keyword (AND/OR/regex), extract entities, save to notes or notify Discord; historical summarise actions are skipped
-- **Reader mode** — fetches and cleans full article content for link-only feeds (HN, Lobsters)
-- **Paywall detection** — identifies paywalled articles and provides archive.ph links
-- **Notes** — save/bookmark items, auto-save via rules
-- **Dark/light themes** — manual toggle with persisted preference (dark by default)
-- **Keyboard shortcuts** — j/k navigate, o open original, s save, h hide, r refresh, Escape return to inbox
-- **Mobile responsive** — 44px touch targets, responsive layouts
+## What it does
 
-## Tech Stack
+- RSS/Atom subscriptions, feed discovery and OPML import/export
+- A compact inbox, grouped navigation, article reader and focus mode
+- Dark/light themes, search, keyboard shortcuts and responsive layout
+- Related-coverage grouping based on article URLs and headlines, with links to original coverage
+- Optional Reddit RSS and X/Twitter feeds in a full/private installation
+- Optional entity extraction, rules, notes and relevance scoring in a full/private installation
+- A read-only showcase deployment with its own database and fresh feed history
 
-| Layer | Technology |
-|-------|-----------|
-| Backend | Python 3.12, FastAPI |
-| Task Queue | Celery + Redis |
-| Database | PostgreSQL 16 |
-| Frontend | SvelteKit 2, Svelte 5, Tailwind CSS 4 |
-| Feed Generation | RSSHub (Twitter, YouTube, Reddit, etc.) |
-| Deployment | Docker Compose, nginx reverse proxy |
-| External Access | Cloudflare Tunnel + Zero Trust Access |
+AI summarisation is disabled. The showcase hides management features and rejects write requests on the server.
 
-## Quick Start
+## Run the public showcase
+
+The showcase is intentionally read-only. To give it a useful feed list, first run a normal FeedWire instance and add the feeds you want to publish. The seed script copies only safe category and feed definitions; it never copies stories or private reading data.
+
+1. Start the full instance by following [Private/full installation](#privatefull-installation) and add your feeds. Keep this instance on a trusted network or behind authentication.
+2. Create a separate showcase password and configure the isolated Compose project:
+
+   ```bash
+   cp .env.showcase.example .env.showcase
+   # Edit .env.showcase: set a long random SHOWCASE_DB_PASSWORD and your public SHOWCASE_ORIGIN.
+   docker compose -p feedwire-showcase --env-file .env.showcase -f docker-compose.showcase.yml up --build -d
+   bash scripts/seed-showcase.sh
+   ```
+
+3. The showcase fetches a fresh batch from the copied feeds. Its default local HTTP port is `8089`. Put a dedicated hostname and HTTPS reverse proxy or Cloudflare Tunnel in front of that port. Do not expose the full/private instance as the public site.
+
+See [Public showcase deployment](docs/showcase-deployment.md) for what is copied, safety boundaries, and routing details.
+
+## Private/full installation
+
+Requirements: Docker and Docker Compose.
 
 ```bash
 git clone https://github.com/funstuie-bit/feedwire.git
 cd feedwire
 cp .env.example .env
-# Edit .env — add ANTHROPIC_API_KEY for AI features, TWITTER_AUTH_TOKEN for Twitter feeds
+# Edit .env and set a long random POSTGRES_PASSWORD.
 docker compose up --build -d
 ```
 
-Open `http://localhost:8088` in your browser.
+Open `http://localhost:8088`. This is the management-capable installation, not the public showcase. It has no built-in user login; keep it on a trusted network or put an authentication layer in front of it before exposing it beyond your LAN. Optional social-feed setup is in [docs/deployment.md](docs/deployment.md#optional-social-feeds).
+
+## Optional Reddit and X feeds
+
+These options apply only to the full/private Compose installation. **Never put Reddit tokens or X cookies in `.env.showcase`, a public seed, a screenshot, or a committed file.** The showcase compose file clears social credentials and the seed script excludes Reddit/X/RSSHub feeds.
+
+- **Reddit:** ordinary `https://www.reddit.com/r/<subreddit>/.rss` subscriptions need no cookie. If Reddit is throttling your installation, you can optionally set `REDDIT_RSS_USER` and `REDDIT_RSS_FEED` in the private `.env`; these are Reddit RSS query credentials, not cookies. Whether they help can vary, and Reddit may change or rate-limit RSS at any time.
+- **X/Twitter:** RSSHub routes require an `auth_token` cookie in `TWITTER_AUTH_TOKEN`. This is a sensitive logged-in session credential. Use it only in the private `.env`; RSSHub may stop working when X or RSSHub changes.
+
+See the step-by-step [optional social-feed setup](docs/deployment.md#optional-social-feeds) and [feed URL examples](docs/feed-sources.md).
 
 ## Configuration
 
-### Environment Variables (.env)
+The full installation reads environment variables from `.env`. AI provider keys are optional and are used for entity extraction only; they can also be configured in the app's Settings page. The showcase uses `.env.showcase` for its separate database password, local port and public origin. Both files are ignored by Git.
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `POSTGRES_PASSWORD` | A strong database password set in `.env` | Yes |
-| `ANTHROPIC_API_KEY` | For optional entity extraction via Claude | No |
-| `OPENAI_API_KEY` | For optional entity extraction via GPT | No |
-| `OPENROUTER_API_KEY` | Access to 300+ models via OpenRouter | No |
-| `GEMINI_API_KEY` | Google Gemini (Pro accounts avoid rate limits) | No |
-| `TWITTER_AUTH_TOKEN` | Twitter cookie auth_token for RSSHub | No |
+| Variable | Used by | Purpose |
+|---|---|---|
+| `POSTGRES_PASSWORD` | Full/private instance | Required PostgreSQL password |
+| `REDDIT_RSS_USER`, `REDDIT_RSS_FEED` | Full/private instance, optional | Reddit RSS query credentials |
+| `TWITTER_AUTH_TOKEN` | Full/private instance, optional | X/Twitter RSSHub session cookie |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY` | Full/private instance, optional | Entity extraction providers |
+| `SHOWCASE_DB_PASSWORD` | Showcase only | Separate PostgreSQL password |
+| `SHOWCASE_HTTP_PORT`, `SHOWCASE_ORIGIN` | Showcase only | Local port and externally visible origin |
 
-API keys, model names, and base URLs can all be configured per-provider in the Settings page (stored in the database). The Settings page also supports Ollama for local model inference.
+## Stack
 
-### Adding Feeds
-
-See [docs/feed-sources.md](docs/feed-sources.md) for a comprehensive reference of feed URLs by category.
-
-Quick starters:
-
-```
-# RSS/Atom
-https://news.ycombinator.com/rss
-https://feeds.bbci.co.uk/news/rss.xml
-https://www.theregister.com/headlines.atom
-
-# Reddit (add .rss to any subreddit)
-https://www.reddit.com/r/selfhosted/.rss
-
-# GitHub releases (add .atom)
-https://github.com/sveltejs/svelte/releases.atom
-
-# Twitter/X (via RSSHub)
-http://rsshub:1200/twitter/user/USERNAME
-
-# YouTube (via RSSHub)
-http://rsshub:1200/youtube/channel/CHANNEL_ID
-```
-
-Browse all RSSHub routes at `http://localhost:8088/rsshub/`.
-
-### Rules
-
-Rules match incoming items and trigger actions automatically. Expressions support:
-- Simple keywords: `python`
-- AND: `rust AND wasm`
-- OR: `rust OR go`
-- Regex: `/\bAI\b/`
-
-Available actions: AI extract entities, Save to Notes, Notify Discord. Historical summarise actions are disabled.
-
-### Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `j` / `k` | Navigate items |
-| `o` / `Enter` | Open article in new tab |
-| `s` | Save/bookmark item |
-| `Escape` | Return to the inbox |
-| `r` | Refresh items |
-| `Escape` | Close reader / exit selection |
-
-## Architecture
-
-```
-nginx (:8088)
-  ├── /api/*    → FastAPI backend (:8000)
-  ├── /rsshub/* → RSSHub (:1200)
-  └── /*        → SvelteKit frontend (:3000)
-
-Celery Beat → schedules periodic tasks
-Celery Worker → feed fetching, rule processing, relevance scoring
-Redis → task queue + RSSHub cache
-PostgreSQL → all application data
-```
-
-### Docker Services
-
-| Service | Purpose |
-|---------|---------|
-| `backend` | FastAPI API server |
-| `frontend` | SvelteKit SSR app |
-| `worker` | Celery task worker |
-| `beat` | Celery periodic scheduler |
-| `db` | PostgreSQL database |
-| `redis` | Task queue and cache |
-| `rsshub` | RSS feed generator for social media |
-| `nginx` | Reverse proxy |
-
-### Background Tasks
-
-| Task | Schedule | Description |
-|------|----------|-------------|
-| `fetch_all_feeds` | Every 5 min | Checks and fetches feeds respecting per-feed intervals |
-| `update_relevance_scores` | Every 15 min | Recalculates item scores based on reading behavior |
-| `cleanup_old_items` | Daily 3am | Removes unsaved items older than 90 days |
-
-## External Access
-
-For a public read-only installation, use the isolated [showcase deployment](docs/showcase-deployment.md). Keep the standard management UI behind authentication or on a trusted network.
-
-## API
-
-All endpoints are under `/api/`:
-
-| Endpoint | Methods | Description |
-|----------|---------|-------------|
-| `/api/health` | GET | Health check |
-| `/api/feeds` | GET, POST | List/add feeds |
-| `/api/feeds/{id}` | DELETE | Remove feed |
-| `/api/feeds/{id}/refresh` | POST | Manually refresh feed |
-| `/api/feeds/synthetic` | POST | Create feed from webpage |
-| `/api/feeds/import-opml` | POST | Import OPML |
-| `/api/feeds/export-opml` | GET | Export OPML |
-| `/api/items` | GET | List items (filterable) |
-| `/api/items/{id}` | GET, PATCH | Get/update item |
-| `/api/items/{id}/readable` | GET | Get cleaned article content |
-| `/api/items/clusters` | GET | Get topic clusters |
-| `/api/items/unread-counts` | GET | Unread counts per feed |
-| `/api/items/mark-all-read` | POST | Mark items as read |
-| `/api/items/bulk-update` | POST | Bulk update items |
-| `/api/categories` | GET, POST | List/create categories |
-| `/api/rules` | GET, POST | List/create rules |
-| `/api/rules/{id}` | PATCH, DELETE | Update/delete rule |
-| `/api/notes` | GET, POST | List/create notes |
-| `/api/ai/process` | POST | Entity extraction; summarise requests return HTTP 410 |
-| `/api/settings` | GET, PATCH | Get/update settings |
+| Layer | Technology |
+|---|---|
+| Backend | Python 3.12, FastAPI |
+| Task queue | Celery, Redis |
+| Database | PostgreSQL 16 |
+| Frontend | SvelteKit 2, Svelte 5, Tailwind CSS 4 |
+| Feed generation | RSSHub in the full/private installation only |
+| Deployment | Docker Compose, nginx |
 
 ## Development
 
@@ -184,9 +93,9 @@ uvicorn main:app --reload --port 8000
 # Frontend (from src/frontend/)
 npm install
 npm run dev -- --port 3000
-
-# Frontend proxies /api to localhost:8000 in dev mode
 ```
+
+The frontend dev server proxies `/api` to `localhost:8000`.
 
 ## License
 
