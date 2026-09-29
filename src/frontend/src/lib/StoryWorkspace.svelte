@@ -13,6 +13,7 @@
   const showcaseMode = env.PUBLIC_SHOWCASE === 'true';
   let items: Item[] = $state([]);
   let feeds: Feed[] = $state([]);
+  let failedFavicons: Set<number> = $state(new Set());
   let categories: Category[] = $state([]);
   let tags: Tag[] = $state([]);
   let selected: Item | null = $state(null);
@@ -46,6 +47,27 @@
   let content = $derived.by(() => readerHtml(readerContent, selected?.link || ''));
 
   function sourceName(id: number, fallback = 'Source') { const f = feeds.find(f => f.id === id); return f ? feedLabel(f) : fallback; }
+  function sourceFavicon(item: Item) {
+    const feed = feeds.find(f => f.id === item.feed_id);
+    const candidate = item.feed_favicon || feed?.favicon_url;
+    if (!candidate) return '';
+    try {
+      const icon = new URL(candidate);
+      const site = feed?.site_url ? new URL(feed.site_url) : null;
+      // Only load HTTPS favicons from the publisher's own origin. This avoids
+      // mixed content and prevents feed metadata from pointing at arbitrary hosts.
+      if (icon.protocol !== 'https:' || !site || icon.origin !== site.origin) return '';
+      return icon.href;
+    } catch { return ''; }
+  }
+  function sourceHue(item: Item) {
+    const feed = feeds.find(f => f.id === item.feed_id);
+    const key = feed?.site_url || item.feed_favicon || String(item.feed_id);
+    let hash = 0;
+    for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) | 0;
+    return Math.abs(hash) % 360;
+  }
+  function markFaviconFailed(feedId: number) { failedFavicons = new Set(failedFavicons).add(feedId); }
   function stripHtml(value: string | null | undefined) { return (value || '').replace(/<[^>]*>/g, ' ').replace(/&[^;]+;/g, ' ').replace(/\s+/g, ' ').trim(); }
   function age(item: Item) { return dayjs(item.published_at || item.created_at).fromNow(); }
   function readingTime(item: Item) { return Math.max(1, Math.ceil(stripHtml(item.content).split(/\s+/).length / 220)); }
@@ -171,7 +193,7 @@
     <div class="fw-list-head" aria-hidden="true"><span>Source</span><span>Story</span><span>Published</span></div>
     {#each items as item (item.id)}
       <button class="fw-story" class:selected={selected?.id === item.id} class:is-read={item.is_read} data-story={item.id} aria-label={'Read ' + (item.title || 'Untitled')} aria-pressed={selected?.id === item.id} onclick={() => openItem(item)}>
-        <span class="fw-source"><span class="fw-favicon" aria-hidden="true">{sourceName(item.feed_id, item.feed_title || '?').slice(0,1)}</span><span>{sourceName(item.feed_id, item.feed_title || 'Source')}</span></span>
+        <span class="fw-source"><span class="fw-favicon" style={`--source-hue:${sourceHue(item)}`} aria-hidden="true">{#if sourceFavicon(item) && !failedFavicons.has(item.feed_id)}<img src={sourceFavicon(item)} alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror={() => markFaviconFailed(item.feed_id)} />{:else}<span>{sourceName(item.feed_id, item.feed_title || '?').slice(0,1)}</span>{/if}</span><span>{sourceName(item.feed_id, item.feed_title || 'Source')}</span></span>
         <span class="fw-story-copy"><span class="fw-story-title">{item.title || 'Untitled'}{#if item.is_saved}<span aria-label="Saved"> ☆</span>{/if}</span><span class="fw-story-deck">{stripHtml(item.content).slice(0,220)}</span></span>
         <span class="fw-story-meta"><span>{age(item)}</span><span class="fw-coverage">{item.similar_items.length ? (item.similar_items.length + 1) + ' sources ↗' : readingTime(item) + ' min read'}</span></span>
       </button>
