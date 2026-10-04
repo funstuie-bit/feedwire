@@ -3,7 +3,7 @@ import type { Category, Feed } from './types';
 export interface Topic { name: string; ids: number[]; count: number }
 export interface Section { name: string; symbol: string; topics: Topic[]; ids: number[]; count: number }
 
-const sectionNames = ['News', 'Technology', 'Sport', 'Culture', 'Business', 'Social', 'Other'];
+export const sectionNames = ['News', 'Technology', 'Sport', 'Culture', 'Business', 'Social', 'Other'];
 const symbols = ['◷', '⌘', '◉', '◈', '▥', '＠', '⋯'];
 const mergedNames: Record<string, string> = {
   'UK News': 'UK news', 'UK News (Neutral to Left)': 'UK news',
@@ -12,12 +12,21 @@ const mergedNames: Record<string, string> = {
 };
 
 // Presentation groups preserve category IDs, rule scopes and subscription history.
+export function categoryGroup(cat: Category): string {
+  const group = cat.group_name?.trim();
+  return ({ Tech: 'Technology', Sports: 'Sport', Entertainment: 'Culture' } as Record<string, string>)[group || '']
+    || group || (cat.name === 'Finance / Markets' ? 'Business' : 'Other');
+}
+
 export function buildLibrary(categories: Category[]): Section[] {
   const sections: Section[] = sectionNames.map((name, i) => ({ name, symbol: symbols[i], topics: [], ids: [], count: 0 }));
   for (const cat of categories.filter(c => c.feed_count > 0)) {
-    const group = cat.name === 'Finance / Markets' ? 'Business' :
-      ({ Tech: 'Technology', Sports: 'Sport', Entertainment: 'Culture' }[cat.group_name || ''] || cat.group_name || 'Other');
-    const section = sections.find(s => s.name === group) || sections[6];
+    const group = categoryGroup(cat);
+    let section = sections.find(s => s.name === group);
+    if (!section) {
+      section = { name: group, symbol: '⋯', topics: [], ids: [], count: 0 };
+      sections.push(section);
+    }
     const name = mergedNames[cat.name] || cat.name;
     let topic = section.topics.find(t => t.name === name);
     if (!topic) { topic = { name, ids: [], count: 0 }; section.topics.push(topic); }

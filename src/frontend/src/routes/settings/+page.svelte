@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getSettings, updateSettings, healthCheck } from '$lib/api';
+	import { getSettings, updateSettings, healthCheck, getAIUsage, updateAIPricing } from '$lib/api';
+	import type { AIUsage } from '$lib/types';
 
 	interface Provider {
 		id: string;
@@ -18,6 +19,39 @@
 	let error = $state('');
 	let success = $state('');
 	let apiHealthy = $state(false);
+	let usage = $state<AIUsage | null>(null);
+	let usageDays = $state(30);
+	let usageLoading = $state(false);
+	let usageError = $state('');
+	let pricingStatus = $state('');
+	let savingPrice = $state(false);
+	let priceProvider = $state('anthropic');
+	let priceModel = $state('');
+	let rates = $state<Record<string, number | undefined>>({ input: undefined, output: undefined, cache_read: undefined, cache_write: undefined });
+	const rateFields = [{ key: 'input', label: 'Input' }, { key: 'output', label: 'Output' }, { key: 'cache_read', label: 'Cached input' }, { key: 'cache_write', label: 'Cache writes' }];
+	const money = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 6 }).format(value);
+	let usageRequest = 0;
+
+	async function loadUsage() {
+		const request = ++usageRequest;
+		usageLoading = true; usageError = '';
+		try { const result = await getAIUsage(usageDays); if (request === usageRequest) usage = result; }
+		catch (e: any) { if (request === usageRequest) usageError = e.message; }
+		finally { if (request === usageRequest) usageLoading = false; }
+	}
+	function loadRate() {
+		const rate = usage?.pricing[`${priceProvider}/${priceModel.trim()}`];
+		rates = Object.fromEntries(rateFields.map(field => [field.key, rate ? Number(rate[field.key as keyof typeof rate]) : undefined]));
+	}
+	async function saveRate() {
+		if (!priceModel.trim() || rateFields.some(field => rates[field.key] === undefined)) return;
+		savingPrice = true; usageError = ''; pricingStatus = '';
+		try {
+			await updateAIPricing(priceProvider, priceModel.trim(), { input: rates.input!, output: rates.output!, cache_read: rates.cache_read!, cache_write: rates.cache_write! });
+			await loadUsage(); pricingStatus = 'Prices saved for future requests';
+		} catch (e: any) { usageError = e.message; }
+		finally { savingPrice = false; }
+	}
 
 	let aiProvider = $state('anthropic');
 	let apiKeys = $state<Record<string, string>>({});
@@ -57,6 +91,7 @@
 			const data = await getSettings();
 			settings = data.settings;
 			aiProvider = settings.ai_provider || 'anthropic';
+			priceProvider = aiProvider;
 			defaultTimeWindow = settings.default_time_window || '24h';
 			defaultFetchInterval = settings.default_fetch_interval || '30';
 
@@ -75,6 +110,9 @@
 				models[provider] = settings[`${provider}_model`] || '';
 				baseUrls[provider] = settings[`${provider}_base_url`] || '';
 			}
+			await loadProviders();
+			priceModel = models[priceProvider] || providers.find(p => p.id === priceProvider)?.default_model || '';
+			await loadUsage(); loadRate();
 		} catch (e: any) {
 			error = e.message;
 		} finally {
@@ -177,7 +215,6 @@
 	}
 
 	onMount(() => {
-		loadProviders();
 		loadSettings();
 		checkHealth();
 	});
@@ -281,6 +318,45 @@
 				</div>
 			{/if}
 		</div>
+
+		<section aria-labelledby="ai-usage-heading" class="bg-[var(--color-surface)] rounded-[8px] border border-[var(--color-border)] p-4 mb-4">
+			<div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+				<h2 id="ai-usage-heading" class="text-sm font-semibold text-[var(--color-text)]">AI usage & cost</h2>
+				<div class="flex items-center gap-2">
+					<select aria-label="Usage period" bind:value={usageDays} onchange={loadUsage} class="px-2 py-2 border border-[var(--color-border)] rounded-[5px] text-sm bg-[var(--color-surface)] text-[var(--color-text)]"><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option></select>
+					<button type="button" onclick={loadUsage} disabled={usageLoading} class="px-3 py-2 text-sm text-[var(--color-action)] disabled:opacity-50">Refresh</button>
+				</div>
+			</div>
+			{#if usageError}<p role="alert" class="text-sm text-[var(--color-danger)] mb-3">{usageError}</p>{/if}
+			{#if usage}
+				<p class="text-sm text-[var(--color-text)] mb-2">{usage.requests.toLocaleString()} requests · Known cost {money(usage.known_cost_usd)}{usageLoading ? ' · Updating…' : ''}</p>
+				<p class="text-xs text-[var(--color-text-muted)] mb-3">Costs include estimates where the provider does not report a price. {usage.unpriced ? `${usage.unpriced} requests have unknown prices and are excluded from the cost total.` : ''} Tracking starts with this release; earlier requests are not included.</p>
+				{#if usage.groups.length}
+					<div class="overflow-x-auto"><table class="w-full text-sm text-left">
+						<thead class="text-xs text-[var(--color-text-muted)]"><tr><th class="py-2 pr-3">Provider / model</th><th class="py-2 pr-3">Requests</th><th class="py-2 pr-3">Input / output tokens</th><th class="py-2">Known cost</th></tr></thead>
+						<tbody>{#each usage.groups as group}<tr class="border-t border-[var(--color-border)] text-[var(--color-text)]">
+							<td class="py-3 pr-3 break-all">{group.provider}<span class="block text-xs text-[var(--color-text-muted)]">{group.model}</span></td>
+							<td class="py-3 pr-3">{group.requests}{#if group.failed}<span class="block text-xs text-[var(--color-text-muted)]">{group.failed} failed</span>{/if}</td>
+							<td class="py-3 pr-3">{group.input_tokens.toLocaleString()} / {group.output_tokens.toLocaleString()}{#if group.missing_usage}<span class="block text-xs text-[var(--color-text-muted)]">{group.missing_usage} missing token counts</span>{/if}</td>
+							<td class="py-3">{group.unpriced === group.requests ? 'Unknown' : money(group.known_cost_usd)}<span class="block text-xs text-[var(--color-text-muted)]">{group.estimated ? 'Includes estimates' : ''}{group.unpriced ? ` · ${group.unpriced} unpriced` : ''}</span></td>
+						</tr>{/each}</tbody>
+					</table></div>
+				{:else}<p class="text-sm text-[var(--color-text-muted)] mb-3">No AI requests recorded in this period.</p>{/if}
+			{/if}
+			<details class="mt-4 border-t border-[var(--color-border)] pt-3">
+				<summary class="cursor-pointer text-sm text-[var(--color-action)]">Model prices</summary>
+				<p class="text-xs text-[var(--color-text-muted)] my-3">USD per million tokens. Prices apply to future requests. Provider-reported costs take precedence. Ollama has no provider charge; unknown models stay unpriced.</p>
+				<form onsubmit={(e) => { e.preventDefault(); saveRate(); }} class="space-y-3">
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+						<div><label for="price-provider" class="block text-xs text-[var(--color-text-secondary)] mb-1">Provider</label><select id="price-provider" bind:value={priceProvider} onchange={() => { priceModel = models[priceProvider] || providers.find(p => p.id === priceProvider)?.default_model || ''; loadRate(); }} class="w-full px-3 py-2 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[5px] text-sm text-[var(--color-text)]">{#each providers as provider}<option value={provider.id}>{provider.name}</option>{/each}</select></div>
+						<div><label for="price-model" class="block text-xs text-[var(--color-text-secondary)] mb-1">Exact model ID</label><input id="price-model" required maxlength="200" bind:value={priceModel} onchange={loadRate} class="w-full px-3 py-2 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[5px] text-sm text-[var(--color-text)]" /></div>
+					</div>
+					<div class="grid grid-cols-2 gap-3">{#each rateFields as field}<div><label for={'price-' + field.key} class="block text-xs text-[var(--color-text-secondary)] mb-1">{field.label}</label><input id={'price-' + field.key} type="number" min="0" max="10000" step="any" required bind:value={rates[field.key]} class="w-full min-w-0 px-3 py-2 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[5px] text-sm text-[var(--color-text)]" /></div>{/each}</div>
+					<button type="submit" disabled={savingPrice} class="px-3 py-2 bg-[var(--color-brand)] text-white rounded-[5px] text-sm disabled:opacity-50">{savingPrice ? 'Saving…' : 'Save model prices'}</button>
+					<p aria-live="polite" class="text-xs text-[var(--color-text-secondary)]">{pricingStatus}</p>
+				</form>
+			</details>
+		</section>
 
 		<div class="bg-[var(--color-surface)] rounded-[8px] border border-[var(--color-border)] p-4 mb-4">
 			<h2 class="text-sm font-semibold text-[var(--color-text)] mb-3">Defaults</h2>

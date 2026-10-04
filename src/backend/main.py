@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from database import engine
 from models import Base
-from routers import feeds, items, rules, notes, ai, categories, settings, digest, tags
+from routers import feeds, items, rules, notes, ai, categories, settings, digest, tags, usage
 
 
 async def _migrate_columns(conn):
@@ -91,6 +91,7 @@ app.include_router(categories.router)
 app.include_router(rules.router)
 app.include_router(notes.router)
 app.include_router(ai.router)
+app.include_router(usage.router)
 app.include_router(settings.router)
 app.include_router(digest.router)
 app.include_router(tags.router)

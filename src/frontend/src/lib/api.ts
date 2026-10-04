@@ -1,4 +1,5 @@
 const BASE = '/api';
+import type { AIUsage, AIRate } from './types';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
 	const res = await fetch(`${BASE}${path}`, {
@@ -77,6 +78,10 @@ export const updateCategory = (id: number, data: { name?: string; sort_order?: n
 		method: 'PATCH',
 		body: JSON.stringify(data),
 	});
+
+export const getAIUsage = (days: number = 30) => request<AIUsage>(`/ai/usage?days=${days}`);
+export const updateAIPricing = (provider: string, model: string, rates: AIRate) =>
+	request<{ ok: boolean }>('/ai/pricing', { method: 'PATCH', body: JSON.stringify({ provider, model, ...rates }) });
 export const deleteCategory = (id: number) =>
 	request<any>(`/categories/${id}`, { method: 'DELETE' });
 

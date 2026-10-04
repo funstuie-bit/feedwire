@@ -38,6 +38,10 @@ celery.conf.beat_schedule = {
         "task": "tasks.cleanup_old_items",
         "schedule": crontab(hour=2, minute=0),  # daily at 2am LA time (before 3am backup)
     },
+    "auto-read-old-items": {
+        "task": "tasks.auto_read_old_items",
+        "schedule": crontab(hour=2, minute=30),  # daily, LA time / DST-aware
+    },
     "update-relevance-scores": {
         "task": "tasks.update_relevance_scores",
         "schedule": 900.0,  # every 15 minutes

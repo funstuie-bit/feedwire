@@ -3,6 +3,7 @@ import json
 from typing import Optional
 import httpx
 from bs4 import BeautifulSoup
+from services.usage import record_usage
 
 
 def _strip_html(html: str) -> str:
@@ -150,7 +151,11 @@ async def extract_entities(
         f"Return ONLY valid JSON, no other text."
     )
 
-    result = await _call_llm(prompt, provider, max_tokens=500, api_key=api_key, model=model, base_url=base_url)
+    try:
+        result = await _call_llm(prompt, provider, max_tokens=500, api_key=api_key, model=model, base_url=base_url)
+    except Exception:
+        await record_usage(provider, model or DEFAULT_MODELS.get(provider, ""), status="failed")
+        raise
 
     try:
         return json.loads(result)
@@ -178,12 +183,14 @@ async def _call_llm(
             prompt, max_tokens, api_key, model,
             base_url="https://api.openai.com/v1",
             env_key="OPENAI_API_KEY",
+            provider=provider,
         )
     elif provider == "openrouter":
         return await _call_openai_compatible(
             prompt, max_tokens, api_key, model,
             base_url="https://openrouter.ai/api/v1",
             env_key="OPENROUTER_API_KEY",
+            provider=provider,
             extra_headers={
                 "HTTP-Referer": "https://feedwire.local",
                 "X-Title": "FeedWire",
@@ -194,6 +201,7 @@ async def _call_llm(
             prompt, max_tokens, api_key or "ollama", model,
             base_url=base_url or "http://host.docker.internal:11434/v1",
             env_key=None,
+            provider=provider,
         )
     elif provider == "gemini":
         return await _call_gemini(prompt, max_tokens, api_key, model)
@@ -215,6 +223,8 @@ async def _call_anthropic(prompt: str, max_tokens: int, api_key: str = "", model
         messages=[{"role": "user", "content": prompt}],
     )
 
+    await record_usage("anthropic", message.model or model, message.usage)
+    await client.close()
     return message.content[0].text
 
 
@@ -222,6 +232,7 @@ async def _call_openai_compatible(
     prompt: str, max_tokens: int, api_key: str, model: str,
     base_url: str, env_key: str | None = None,
     extra_headers: dict | None = None,
+    provider: str = "openai",
 ) -> str:
     if env_key:
         api_key = api_key or os.getenv(env_key, "")
@@ -241,7 +252,11 @@ async def _call_openai_compatible(
         messages=[{"role": "user", "content": prompt}],
     )
 
-    return response.choices[0].message.content
+    usage = response.usage.model_dump() if response.usage else None
+    await record_usage(provider, response.model or model, usage,
+                       reported_cost=usage.get("cost") if usage else None)
+    await client.close()
+    return response.choices[0].message.content or ""
 
 
 async def _call_gemini(prompt: str, max_tokens: int, api_key: str = "", model: str = "") -> str:
@@ -258,4 +273,5 @@ async def _call_gemini(prompt: str, max_tokens: int, api_key: str = "", model: s
         config={"max_output_tokens": max_tokens},
     )
 
-    return response.text
+    await record_usage("gemini", model or DEFAULT_MODELS["gemini"], response.usage_metadata)
+    return response.text or ""

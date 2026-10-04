@@ -64,8 +64,8 @@ async def update_category(
 
     payload = cat_in.model_dump(exclude_unset=True)
     # Treat empty string as null for group_name so the UI can "ungroup".
-    if "group_name" in payload and payload["group_name"] == "":
-        payload["group_name"] = None
+    if "group_name" in payload:
+        payload["group_name"] = (payload["group_name"] or "").strip() or None
     for field, value in payload.items():
         setattr(cat, field, value)
     await db.commit()

@@ -5,7 +5,8 @@ from collections import defaultdict
 from models import Item, Feed, Category
 from sqlalchemy import select, func, or_
 from services.discord import send_webhook, build_digest_embed
-from services.dedup import title_similarity
+from services.dedup import same_story
+from services.semantic import embeddings_for_items
 
 
 async def generate_digest(
@@ -57,7 +58,8 @@ async def generate_digest(
     }
 
     by_category: dict[str, list[dict]] = defaultdict(list)
-    seen_titles_global: list[str] = []
+    seen_items_global: list[Item] = []
+    embeddings = embeddings_for_items([row[0] for row in items])
     seen_feed_per_cat: dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
 
     for item, feed, cat_name in items:
@@ -69,7 +71,7 @@ async def generate_digest(
         # skip this one. Since items are walked in relevance order, the highest
         # scoring instance keeps its slot.
         title = item.title or "Untitled"
-        if any(title_similarity(title, t) >= 0.75 for t in seen_titles_global):
+        if any(same_story(item, other, embeddings=embeddings) for other in seen_items_global):
             continue
 
         # Per-feed cap within category — stops one chatty feed monopolising slots
@@ -80,7 +82,7 @@ async def generate_digest(
         if seen_feed_per_cat[key][feed_id] >= cap:
             continue
 
-        seen_titles_global.append(title)
+        seen_items_global.append(item)
         seen_feed_per_cat[key][feed_id] += 1
 
         entry = {

@@ -5,6 +5,30 @@ from collections import defaultdict
 from models import Item
 from urllib.parse import urlsplit, parse_qsl, urlencode
 from datetime import timedelta
+from services.semantic import embeddings_for_items
+
+
+STOP_WORDS = {"a", "an", "the", "and", "or", "to", "of", "in", "on", "for", "with", "by", "at", "as", "is", "its", "new"}
+OPPOSITES = [
+    ({"win", "wins", "won", "beat", "beats", "victory"}, {"lose", "loses", "lost", "loss"}),
+    ({"approve", "approves", "approved", "passes"}, {"reject", "rejects", "rejected", "blocks", "blocked"}),
+    ({"raise", "raises", "raised", "increase", "increases", "rises"}, {"cut", "cuts", "lower", "lowers", "falls"}),
+]
+
+
+def headline_words(title):
+    return set(re.findall(r"[a-z]+", re.sub(r"['’]s\b", "", title.lower()))) - STOP_WORDS
+
+
+def headline_conflicts(a, b):
+    nums_a, nums_b = set(re.findall(r"\d+(?:\.\d+)?", a)), set(re.findall(r"\d+(?:\.\d+)?", b))
+    if nums_a and nums_b and nums_a != nums_b:
+        return True
+    wa, wb = headline_words(a), headline_words(b)
+    if bool(wa & {"not", "no", "never", "cannot"}) != bool(wb & {"not", "no", "never", "cannot"}):
+        return True
+    return any((wa & positive and wb & negative) or (wb & positive and wa & negative)
+               for positive, negative in OPPOSITES)
 
 
 def canonical_article_url(url: str | None) -> str:
@@ -24,7 +48,7 @@ def canonical_article_url(url: str | None) -> str:
         return ""
 
 
-def same_story(a: Item, b: Item, threshold: float) -> bool:
+def same_story(a: Item, b: Item, threshold: float = 0.75, embeddings: dict | None = None) -> bool:
     link_a, link_b = canonical_article_url(a.link), canonical_article_url(b.link)
     if link_a and link_a == link_b:
         return True
@@ -32,6 +56,8 @@ def same_story(a: Item, b: Item, threshold: float) -> bool:
         return False
     date_a, date_b = a.published_at or a.created_at, b.published_at or b.created_at
     if date_a and date_b and abs(date_a - date_b) > timedelta(hours=48):
+        return False
+    if headline_conflicts(a.title or "", b.title or ""):
         return False
     if title_similarity(a.title or "", b.title or "") >= threshold:
         return True
@@ -42,8 +68,16 @@ def same_story(a: Item, b: Item, threshold: float) -> bool:
     wb = set(normalize_title(b.title or "").split()) - stop
     shorter, longer = sorted((wa, wb), key=len)
     nums_a, nums_b = {w for w in wa if w.isdigit()}, {w for w in wb if w.isdigit()}
-    return (len(shorter) >= 6 and len(shorter & longer) / len(shorter) >= 0.9
-            and not (nums_a and nums_b and nums_a != nums_b))
+    if (len(shorter) >= 6 and len(shorter & longer) / len(shorter) >= 0.9
+            and not (nums_a and nums_b and nums_a != nums_b)):
+        return True
+    if embeddings and a.id in embeddings and b.id in embeddings:
+        wa, wb = headline_words(a.title or ""), headline_words(b.title or "")
+        if min(len(wa), len(wb)) >= 3 and wa & wb:
+            # FastEmbed normalises vectors. A high cosine threshold plus factual
+            # guards favours missed duplicates over hiding distinct stories.
+            return float(embeddings[a.id] @ embeddings[b.id]) >= 0.85
+    return False
 
 
 def normalize_title(title: str) -> str:
@@ -76,11 +110,12 @@ def find_duplicates(items: list[Item], threshold: float = 0.75) -> dict[int, lis
     groups: dict[int, list[int]] = {}
     used: set[int] = set()
     rank = {item.id: index for index, item in enumerate(items)}
+    embeddings = embeddings_for_items(items)
 
     # The concise headline is the anchor for expanded versions. Select anchors
     # independently of query sort order, then keep the first input item as the
     # displayed representative so newest/relevance ordering is preserved.
-    for item_a in sorted(items, key=lambda item: len(normalize_title(item.title or ""))):
+    for item_a in sorted(items, key=lambda item: (len(normalize_title(item.title or "")), item.id)):
         if item_a.id in used:
             continue
 
@@ -88,7 +123,7 @@ def find_duplicates(items: list[Item], threshold: float = 0.75) -> dict[int, lis
         for item_b in items:
             if item_a.id == item_b.id or item_b.id in used:
                 continue
-            if same_story(item_a, item_b, threshold):
+            if same_story(item_a, item_b, threshold, embeddings):
                 duplicates.append(item_b.id)
                 used.add(item_b.id)
 

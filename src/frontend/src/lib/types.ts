@@ -1,3 +1,14 @@
+export interface AIRate { input: number | string; output: number | string; cache_read: number | string; cache_write: number | string }
+export interface AIUsageGroup {
+	provider: string; model: string; requests: number; input_tokens: number; output_tokens: number;
+	cache_read_tokens: number; cache_write_tokens: number; known_cost_usd: number; unpriced: number;
+	failed: number; estimated: number; missing_usage: number;
+}
+export interface AIUsage {
+	days: number; tracking_since: string | null; requests: number; known_cost_usd: number; unpriced: number;
+	groups: AIUsageGroup[]; pricing: Record<string, AIRate>;
+}
+
 export interface Category {
 	id: number;
 	name: string;

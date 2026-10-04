@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, DateTime, ForeignKey,
-    JSON, UniqueConstraint, Index, Float, Table
+    JSON, UniqueConstraint, Index, Float, Table, Numeric
 )
 from sqlalchemy.orm import relationship, DeclarativeBase
 from datetime import datetime, timezone
@@ -157,3 +157,21 @@ class Setting(Base):
     id = Column(Integer, primary_key=True)
     key = Column(String(200), nullable=False, unique=True)
     value = Column(Text)
+
+
+class UsageLog(Base):
+    __tablename__ = "usage_logs"
+
+    id = Column(Integer, primary_key=True)
+    provider = Column(String(50), nullable=False)
+    model = Column(String(200), nullable=False)
+    operation = Column(String(50), nullable=False, default="extract_entities")
+    status = Column(String(20), nullable=False, default="success")
+    usage_reported = Column(Boolean, nullable=False, default=False)
+    input_tokens = Column(Integer, nullable=False, default=0)
+    output_tokens = Column(Integer, nullable=False, default=0)
+    cache_read_tokens = Column(Integer, nullable=False, default=0)
+    cache_write_tokens = Column(Integer, nullable=False, default=0)
+    cost_usd = Column(Numeric(20, 10), nullable=True)
+    cost_source = Column(String(20), nullable=False, default="unknown")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getFeeds, addFeed, addSyntheticFeed, deleteFeed, updateFeed, refreshFeed, getCategories, createCategory, importOPML, exportOPML, getFaviconUrl } from '$lib/api';
+	import { getFeeds, addFeed, addSyntheticFeed, deleteFeed, updateFeed, refreshFeed, getCategories, createCategory, updateCategory, importOPML, exportOPML, getFaviconUrl } from '$lib/api';
+	import { categoryGroup, sectionNames } from '$lib/library';
 	import type { Feed, Category } from '$lib/types';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime.js';
@@ -19,11 +20,29 @@
 	let showImport = $state(false);
 	let opmlContent = $state('');
 	let feedMode = $state<'rss' | 'synthetic'>('rss');
+	let groupDrafts = $state<Record<number, string>>({});
+	let savingGroupId = $state<number | null>(null);
+	let groupStatus = $state('');
+	let groupOptions = $derived([...new Set([...sectionNames, ...categories.map(categoryGroup)])]);
+
+	async function saveGroup(cat: Category) {
+		savingGroupId = cat.id;
+		error = ''; groupStatus = '';
+		try {
+			const updated = await updateCategory(cat.id, { group_name: groupDrafts[cat.id]?.trim() || null });
+			categories = categories.map(c => c.id === cat.id ? updated : c);
+			groupDrafts[cat.id] = categoryGroup(updated);
+			groupStatus = `${cat.name} moved to ${categoryGroup(updated)}`;
+			window.dispatchEvent(new Event('feedwire-items-changed'));
+		} catch (e: any) { error = e.message; }
+		finally { savingGroupId = null; }
+	}
 
 	async function loadData() {
 		loading = true;
 		try {
 			[feeds, categories] = await Promise.all([getFeeds(), getCategories()]);
+			groupDrafts = Object.fromEntries(categories.map(cat => [cat.id, categoryGroup(cat)]));
 		} catch (e: any) {
 			error = e.message;
 		} finally {
@@ -67,6 +86,7 @@
 			feed.category_id = newCategoryId;
 			// Refresh categories to update counts
 			categories = await getCategories();
+			window.dispatchEvent(new Event('feedwire-items-changed'));
 		} catch (e: any) {
 			error = e.message;
 		}
@@ -113,6 +133,8 @@
 			await createCategory(newCategoryName.trim());
 			newCategoryName = '';
 			categories = await getCategories();
+			groupDrafts = Object.fromEntries(categories.map(cat => [cat.id, groupDrafts[cat.id] ?? categoryGroup(cat)]));
+			window.dispatchEvent(new Event('feedwire-items-changed'));
 		} catch (e: any) {
 			error = e.message;
 		}
@@ -308,17 +330,21 @@
 	<!-- Categories -->
 	<div class="bg-[var(--color-surface)] rounded-[8px] border border-[var(--color-border)] p-4 mb-6">
 		<h2 class="text-sm font-semibold text-[var(--color-text)] mb-3">Categories</h2>
-		<div class="flex flex-wrap gap-2 mb-3">
+		<p class="text-xs text-[var(--color-text-muted)] mb-3">Choose a sidebar group, or type a new name. Categories and subscriptions stay intact.</p>
+		<datalist id="sidebar-groups">{#each groupOptions as group}<option value={group}></option>{/each}</datalist>
+		<div class="space-y-3 mb-4">
 			{#each categories as cat}
-				<span class="inline-flex items-center gap-1.5 px-3 py-1 bg-[var(--color-surface-alt)] rounded-full text-sm text-[var(--color-text)]">
-					{cat.name}
-					<span class="text-xs text-[var(--color-text-muted)]">({cat.feed_count})</span>
-				</span>
+				<form onsubmit={(e) => { e.preventDefault(); saveGroup(cat); }} class="flex flex-wrap items-center gap-2">
+					<label for={'category-group-' + cat.id} class="w-full sm:w-60 text-sm text-[var(--color-text)]">{cat.name} <span class="text-xs text-[var(--color-text-muted)]">({cat.feed_count})</span></label>
+					<input id={'category-group-' + cat.id} list="sidebar-groups" maxlength="100" bind:value={groupDrafts[cat.id]} placeholder="Other" class="flex-1 min-w-0 px-3 py-2 border border-[var(--color-border)] rounded-[5px] text-sm bg-[var(--color-surface)] text-[var(--color-text)]" />
+					<button type="submit" disabled={savingGroupId !== null || groupDrafts[cat.id]?.trim() === categoryGroup(cat)} class="px-3 py-2 rounded-[5px] bg-[var(--color-brand)] text-white text-sm disabled:opacity-50">{savingGroupId === cat.id ? 'Saving…' : 'Save'}</button>
+				</form>
 			{/each}
 			{#if categories.length === 0}
 				<span class="text-sm text-[var(--color-text-muted)]">No categories yet</span>
 			{/if}
 		</div>
+		<p aria-live="polite" class="text-xs text-[var(--color-text-secondary)] mb-3">{groupStatus}</p>
 		<form onsubmit={(e) => { e.preventDefault(); handleAddCategory(); }} class="flex gap-2">
 			<input
 				type="text"

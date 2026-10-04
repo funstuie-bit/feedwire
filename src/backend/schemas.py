@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional
 
@@ -11,7 +11,7 @@ class CategoryCreate(BaseModel):
 class CategoryUpdate(BaseModel):
     name: Optional[str] = None
     sort_order: Optional[int] = None
-    group_name: Optional[str] = None
+    group_name: Optional[str] = Field(default=None, max_length=100)
 
 class CategoryOut(BaseModel):
     id: int

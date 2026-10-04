@@ -10,13 +10,22 @@ This repository documents both that isolated public-showcase setup and the optio
 
 - RSS/Atom subscriptions, feed discovery and OPML import/export
 - A compact inbox, grouped navigation, article reader and focus mode
+- Edit category groups on Sources, including custom sidebar groups
+- Daily seven-day auto-read runs inside the app; saved/hidden items are untouched
 - Dark/light themes, search, keyboard shortcuts and responsive layout
-- Related-coverage grouping based on article URLs and headlines, with links to original coverage
+- Related-coverage grouping uses article URLs, headlines and local semantic matching, including across the daily digest
 - Optional Reddit RSS and X/Twitter feeds in a full/private installation
 - Optional entity extraction, rules, notes and relevance scoring in a full/private installation
+- Settings shows AI request/token totals and known USD costs by provider/model; metering starts at installation
 - A read-only showcase deployment with its own database and fresh feed history
 
 AI summarisation is disabled. The showcase hides management features and rejects write requests on the server.
+
+Semantic matching runs a small MiniLM model locally, with checks for differing dates, numbers and outcomes. The Docker build downloads the model; runtime does not send headlines to an AI provider. If it is unavailable, URL/headline matching still works. Grouping preserves stored stories and original coverage links.
+
+Seven-day auto-read runs daily at 02:30 America/Los_Angeles through Celery beat and the control worker. It uses publication time, falling back to ingestion time, and skips saved/hidden items. Existing installations should remove any old `auto-read-7d.sh` host cron entry after deploying this version. The separate 90-day retention task preserves saved items, notes and learning records.
+
+AI usage logs store metering only, without prompts, article text or credentials. Provider-reported costs take precedence; other costs use editable per-model rates in Settings. Unknown prices are labelled unpriced. Local Ollama has zero provider cost. Rates apply to future requests; historical costs are retained. Default Claude rates were checked against [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing) on 4 October 2026.
 
 ## Run the public showcase
 

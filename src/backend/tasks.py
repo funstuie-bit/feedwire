@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from celery_app import celery
 from database import SyncSession
 from models import Feed, Item, Rule, Note, UserAction, Setting
-from sqlalchemy import select
+from sqlalchemy import select, update, func
 from services.feed_parser import fetch_and_parse_feed
 from services.rule_engine import evaluate_rule, get_rule_actions
 from services.ai_service import extract_entities, DEFAULT_MODELS
@@ -308,6 +308,8 @@ def cleanup_old_items(days: int = 90):
             select(Item).where(
                 Item.created_at < cutoff,
                 Item.is_saved == False,
+                ~select(Note.id).where(Note.item_id == Item.id).exists(),
+                ~select(UserAction.id).where(UserAction.item_id == Item.id).exists(),
             )
         ).scalars().all()
 
@@ -317,3 +319,22 @@ def cleanup_old_items(days: int = 90):
         session.commit()
     finally:
         session.close()
+
+
+@celery.task(name="tasks.auto_read_old_items")
+def auto_read_old_items(days: int = 7):
+    """Bound unread badges to the last week, keeping saved/hidden items intact."""
+    if days < 1:
+        raise ValueError("days must be positive")
+    with SyncSession() as session:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        result = session.execute(
+            update(Item).where(
+                Item.is_read == False,
+                Item.is_hidden == False,
+                Item.is_saved == False,
+                func.coalesce(Item.published_at, Item.created_at) < cutoff,
+            ).values(is_read=True)
+        )
+        session.commit()
+        return {"marked_read": result.rowcount, "days": days}
